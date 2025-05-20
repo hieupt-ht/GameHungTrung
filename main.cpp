@@ -6,7 +6,7 @@
 #include <dos.h>
 #include <mmsystem.h> // Thý vi?n cho âm thanh
 #pragma comment(lib, "winmm.lib") // Link thý vi?n Windows Multimedia
-
+#include<math.h>
 #define MAX_GA 5
 #define MAX_ACTIVE_EGGS 2  // Gi?i h?n s? lý?ng tr?ng rõi cùng lúc
 #define SCREEN_WIDTH 640
@@ -16,7 +16,8 @@
 #define TRUNG_THUONG 0
 #define TRUNG_VANG   1
 #define TRUNG_BOM    2
-
+#define TRUNG_CHAM   3  // Tr?ng làm ch?m
+#define TRUNG_NAM_CHAM 4  // Tr?ng nam châm
 // C?u trúc cho tr?ng
 struct Egg {
     int x, y;
@@ -36,9 +37,13 @@ struct Chicken {
 };
 
 // C?u trúc cho r? h?ng
+// C?u trúc cho r? h?ng
 struct Basket {
     int x, y;
     int width, height;
+    int slowEffect;       // Th?i gian hi?u ?ng làm ch?m c?n l?i
+    int magnetEffect;     // Th?i gian hi?u ?ng nam châm c?n l?i
+    int magnetRadius;     // Bán kính hút c?a nam châm
 };
 
 // C?u trúc cho h?nh ?nh n?n
@@ -167,6 +172,7 @@ void drawBasket(Basket basket) {
 }
 
 // V? tr?ng v?i các lo?i khác nhau
+// V? tr?ng v?i các lo?i khác nhau
 void drawEgg(Egg e) {
     switch (e.type) {
         case TRUNG_THUONG:
@@ -180,6 +186,14 @@ void drawEgg(Egg e) {
         case TRUNG_BOM:
             setcolor(RED);
             setfillstyle(SOLID_FILL, RED);
+            break;
+        case TRUNG_CHAM:
+            setcolor(CYAN);
+            setfillstyle(SOLID_FILL, CYAN);
+            break;
+        case TRUNG_NAM_CHAM:
+            setcolor(MAGENTA);
+            setfillstyle(SOLID_FILL, MAGENTA);
             break;
     }
     
@@ -199,6 +213,19 @@ void drawEgg(Egg e) {
         setcolor(BLACK);
         line(e.x-5, e.y-5, e.x+5, e.y+5);
         line(e.x+5, e.y-5, e.x-5, e.y+5);
+    } else if (e.type == TRUNG_CHAM) {
+        // Thêm chi ti?t cho tr?ng làm ch?m
+        setcolor(BLUE);
+        circle(e.x, e.y, 3);
+        line(e.x-5, e.y, e.x+5, e.y);  // D?u ð?ng h? ngang
+        line(e.x, e.y-5, e.x, e.y+5);  // Ðý?ng d?c
+    } else if (e.type == TRUNG_NAM_CHAM) {
+        // Thêm chi ti?t cho tr?ng nam châm
+        setcolor(WHITE);
+        // V? h?nh nam châm ðõn gi?n
+        arc(e.x, e.y-3, 0, 180, 4);
+        line(e.x-4, e.y-3, e.x-4, e.y+3);
+        line(e.x+4, e.y-3, e.x+4, e.y+3);
     }
 }
 
@@ -285,11 +312,11 @@ int checkCollision(Egg egg, Basket basket) {
 }
 
 // Hi?n th? ði?m và m?ng s?ng
-void displayStatus(int score, int lives, int level) {
+void displayStatus(int score, int lives, int level, Basket basket) {
     char status[50];
     setcolor(WHITE);
     setfillstyle(SOLID_FILL, BLACK);
-    bar(0, 0, 200, 30);
+    bar(0, 0, 300, 30);
     
     sprintf(status, "Score: %d", score);
     outtextxy(10, 10, status);
@@ -299,6 +326,19 @@ void displayStatus(int score, int lives, int level) {
     
     sprintf(status, "Level: %d", level);
     outtextxy(180, 10, status);
+    
+    // Hi?n th? các hi?u ?ng ð?c bi?t n?u có
+    if (basket.slowEffect > 0) {
+        setcolor(CYAN);
+        sprintf(status, "Slow: %d", basket.slowEffect/30);
+        outtextxy(250, 10, status);
+    }
+    
+    if (basket.magnetEffect > 0) {
+        setcolor(MAGENTA);
+        sprintf(status, "Magnet: %d", basket.magnetEffect/30);
+        outtextxy(350, 10, status);
+    }
     
     // Hi?n th? bi?u tý?ng tr?ng và s? lý?ng c?n l?i
     for (int i = 0; i < lives; i++) {
@@ -387,21 +427,13 @@ void drawGameOverScreen(int score) {
 }
 
 // Hàm ð? ch?n ng?u nhiên m?t s? lý?ng gà ð? th? tr?ng
-// S?a l?i ð? ð?m b?o có m?t tr?ng bom và m?t tr?ng thý?ng/vàng
 void selectRandomChickensToLayEggs(Chicken chickens[]) {
     int activeCount = 0;
-    int hasBomb = 0;
-    int hasNormalOrGold = 0;
     
-    // Ð?m s? tr?ng ðang ho?t ð?ng và ki?m tra lo?i tr?ng
+    // Ð?m s? tr?ng ðang ho?t ð?ng
     for (int i = 0; i < MAX_GA; i++) {
         if (chickens[i].egg.active) {
             activeCount++;
-            if (chickens[i].egg.type == TRUNG_BOM) {
-                hasBomb = 1;
-            } else {
-                hasNormalOrGold = 1;
-            }
         }
     }
     
@@ -422,25 +454,33 @@ void selectRandomChickensToLayEggs(Chicken chickens[]) {
             // Ch?n ng?u nhiên m?t con gà
             int selectedIndex = inactiveChickens[rand() % inactiveCount];
             
-            // Quy?t ð?nh lo?i tr?ng d?a trên tr?ng hi?n t?i ðang rõi
-            if (!hasBomb && !hasNormalOrGold) {
-                // N?u chýa có tr?ng nào, quy?t ð?nh ng?u nhiên lo?i tr?ng ð?u tiên
-                chickens[selectedIndex].egg.type = (rand() % 3 == 0) ? TRUNG_BOM : 
-                                                  (rand() % 2 == 0) ? TRUNG_VANG : TRUNG_THUONG;
-            } else if (!hasBomb) {
-                // N?u chýa có tr?ng bom, thêm tr?ng bom
+            // Quy?t ð?nh ng?u nhiên lo?i tr?ng (có 5 lo?i)
+            int eggType = rand() % 10;  // T? l? xu?t hi?n các lo?i tr?ng
+            if (eggType < 4)          // 40% tr?ng thý?ng
+                chickens[selectedIndex].egg.type = TRUNG_THUONG;
+            else if (eggType < 6)     // 20% tr?ng vàng
+                chickens[selectedIndex].egg.type = TRUNG_VANG;
+            else if (eggType < 8)     // 20% tr?ng bom
                 chickens[selectedIndex].egg.type = TRUNG_BOM;
-            } else if (!hasNormalOrGold) {
-                // N?u chýa có tr?ng thý?ng/vàng, thêm tr?ng thý?ng ho?c vàng
-                chickens[selectedIndex].egg.type = (rand() % 3 == 0) ? TRUNG_VANG : TRUNG_THUONG;
-            }
+            else if (eggType < 9)     // 10% tr?ng làm ch?m
+                chickens[selectedIndex].egg.type = TRUNG_CHAM;
+            else                      // 10% tr?ng nam châm
+                chickens[selectedIndex].egg.type = TRUNG_NAM_CHAM;
             
             // Kích ho?t tr?ng
             chickens[selectedIndex].egg.active = 1;
         }
     }
 }
-
+// V? hi?u ?ng nam châm n?u ðang ho?t ð?ng
+void drawMagnetEffect(Basket basket) {
+    if (basket.magnetEffect > 0) {
+        setcolor(MAGENTA);
+        setlinestyle(DOTTED_LINE, 0, NORM_WIDTH);
+        circle(basket.x + basket.width/2, basket.y + basket.height/2, basket.magnetRadius);
+        setlinestyle(SOLID_LINE, 0, NORM_WIDTH);
+    }
+}
 int main() {
     int gd = DETECT, gm;
     initgraph(&gd, &gm, "");
@@ -460,6 +500,9 @@ int main() {
     basket.y = 400;
     basket.width = 50;
     basket.height = 30;
+    basket.slowEffect = 0;
+    basket.magnetEffect = 0;
+    basket.magnetRadius = 100;  // Bán kính hút là 100 pixel
     
     // Kh?i t?o gà
     Chicken chickens[MAX_GA];
@@ -483,13 +526,24 @@ int main() {
     int basketSpeed = 10;
     int eggDropTimer = 0;  // Th?i gian ð?m ngý?c ð? th? tr?ng ti?p theo
     
-    // Chõi nh?c n?n v?i PlaySound (s? ch?y liên t?c nh? c? SND_LOOP)
+    // Chõi nh?c n?n v?i PlaySound
     PlaySound(TEXT("C:\\Users\\HIEU\\Downloads\\gagay1.wav"), NULL, SND_ASYNC | SND_LOOP);
     
     // Hi?n th? màn h?nh b?t ð?u
     drawStartScreen();
     
+    // Thi?t l?p trang ð? h?a
+    int page = 0;
+    
     while (lives > 0) {
+        // Ð?t trang active là trang hi?n ðang v?
+        setactivepage(page);
+        // Trang hi?n th? là trang ð?i di?n
+        setvisualpage(1 - page);
+        
+        // Xóa màn h?nh
+        cleardevice();
+        
         if (kbhit()) {
             ch = getch();
             if (ch == 27) break; // ESC ð? thoát
@@ -505,11 +559,6 @@ int main() {
             }
         }
         
-        // Xóa màn h?nh
-setactivepage(0);
-        setvisualpage(1);
-        cleardevice();
-        
         // V? n?n
         drawBackground(bg);
         
@@ -517,8 +566,8 @@ setactivepage(0);
         if (score >= oldScore + 50) {
             level++;
             oldScore = score;
-            // S? d?ng mciSendString cho hi?u ?ng âm thanh tãng c?p
-            //playEffectSound("level_up.wav");
+            // Phát âm thanh tãng c?p
+            playEffectSound("C:\\Users\\HIEU\\Downloads\\level_up.wav");
         }
         
         // V? r?
@@ -527,12 +576,24 @@ setactivepage(0);
         // X? l? timer th? tr?ng
         eggDropTimer--;
         if (eggDropTimer <= 0) {
-            // Ch?n ng?u nhiên các con gà ð? th? tr?ng (t?i ða MAX_ACTIVE_EGGS qu?)
+            // Ch?n ng?u nhiên các con gà ð? th? tr?ng
             selectRandomChickensToLayEggs(chickens);
             
             // Ð?t l?i th?i gian ð?m ngý?c (gi?m d?n theo c?p ð? ð? game khó hõn)
             eggDropTimer = 80 - level * 5;
             if (eggDropTimer < 30) eggDropTimer = 30; // Không ð? quá nhanh
+        }
+        
+        // X? l? hi?u ?ng làm ch?m
+        if (basket.slowEffect > 0) {
+            basket.slowEffect--;
+        }
+        
+        // X? l? hi?u ?ng nam châm
+        if (basket.magnetEffect > 0) {
+            basket.magnetEffect--;
+            // V? hi?u ?ng nam châm
+            drawMagnetEffect(basket);
         }
         
         // X? l? và v? gà và tr?ng
@@ -565,27 +626,57 @@ setactivepage(0);
                     e->x = chickens[i].x;
                 }
                 
+                // Tính toán t?c ð? th?c t? c?a tr?ng (b? ch?m l?i n?u có hi?u ?ng)
+                int actualSpeed = e->speed;
+                if (basket.slowEffect > 0) {
+                    actualSpeed = e->speed / 2;  // Gi?m t?c ð? tr?ng rõi c?n 1/2
+                    if (actualSpeed < 1) actualSpeed = 1;
+                }
+                
+                // Hi?u ?ng nam châm
+                if (basket.magnetEffect > 0 && e->type != TRUNG_BOM) {
+                    // Tính kho?ng cách t? tr?ng ð?n r?
+                    int dx = (basket.x + basket.width/2) - e->x;
+                    int dy = (basket.y + basket.height/2) - e->y;
+                    int distance = sqrt(dx*dx + dy*dy);
+                    
+                    // N?u tr?ng trong ph?m vi hút
+                    if (distance < basket.magnetRadius) {
+                        // Di chuy?n tr?ng v? phía r?
+                        e->x += dx / 10;
+                        e->y += dy / 10;
+                    }
+                }
+                
+                // Di chuy?n tr?ng v?i t?c ð? th?c t?
+                e->y += actualSpeed;
+                
+                // V? tr?ng
                 drawEgg(*e);
-                e->y += e->speed;
                 
                 // Ki?m tra va ch?m v?i r?
                 if (checkCollision(*e, basket)) {
                     switch (e->type) {
                         case TRUNG_THUONG:
                             score += 1;
-                            // S? d?ng mciSendString cho âm thanh h?ng tr?ng
                             playEffectSound("C:\\Users\\HIEU\\Downloads\\tangdiem1.wav");
                             break;
                         case TRUNG_VANG:
                             score += 5;
-                            // S? d?ng mciSendString cho âm thanh h?ng tr?ng vàng
                             playEffectSound("C:\\Users\\HIEU\\Downloads\\trungvang.wav");
                             break;
                         case TRUNG_BOM:
                             lives--;
                             drawExplosion(e->x, e->y);
-                            // S? d?ng mciSendString cho âm thanh bom n?
                             playEffectSound("C:\\Users\\HIEU\\Downloads\\trungno.wav");
+                            break;
+                        case TRUNG_CHAM:
+                            basket.slowEffect = 300;  // Hi?u ?ng làm ch?m kéo dài 10 giây (300/30)
+                            playEffectSound("C:\\Users\\HIEU\\Downloads\\tangdiem1.wav");  // Thay b?ng âm thanh phù h?p n?u có
+                            break;
+                        case TRUNG_NAM_CHAM:
+                            basket.magnetEffect = 450;  // Hi?u ?ng nam châm kéo dài 15 giây (450/30)
+                            playEffectSound("C:\\Users\\HIEU\\Downloads\\tangdiem1.wav");  // Thay b?ng âm thanh phù h?p n?u có
                             break;
                     }
                     resetEgg(e, chickens[i].x, level);
@@ -595,7 +686,7 @@ setactivepage(0);
                     if (e->type != TRUNG_BOM) {
                         lives--;
                         drawBrokenEgg(e->x, SCREEN_HEIGHT - bg.grassHeight);
-                        // S? d?ng mciSendString ð? phát âm thanh tr?ng v?
+                        // Phát âm thanh tr?ng v?
                         playEffectSound("C:\\Users\\HIEU\\Downloads\\tiengno.wav");
                     }
                     resetEgg(e, chickens[i].x, level);
@@ -604,14 +695,18 @@ setactivepage(0);
         }
         
         // Hi?n th? ði?m và m?ng
-        displayStatus(score, lives, level);
+        // Hi?n th? ði?m và m?ng
+displayStatus(score, lives, level, basket);
         
-        // C?p nh?t màn h?nh
-        delay(30); // Th?i gian tr? ð? game không quá nhanh
+        // Ð?i trang
+        page = 1 - page;
+        
+        // Th?i gian tr? ð? game không quá nhanh
+        delay(30);
     }
     
     // Hi?n th? màn h?nh k?t thúc game
-    // S? d?ng mciSendString cho âm thanh k?t thúc game
+    // D?ng nh?c n?n và phát âm thanh k?t thúc game
     PlaySound(NULL, NULL, 0);
     playEffectSound("C:\\Users\\HIEU\\Downloads\\gameover1.wav");
     drawGameOverScreen(score);
